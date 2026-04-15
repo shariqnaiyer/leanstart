@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 /// High-level specification for a devnet deployment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevnetSpec {
-    /// Total number of validators across all clients.
-    pub validators: u32,
-    /// Client allocations as (client_name, percentage).
+    /// Client allocations as (client_name, instance_count).
     pub clients: Vec<ClientAllocation>,
     /// Number of validators assigned to each pod.
     pub validators_per_pod: u32,
@@ -29,35 +27,43 @@ pub struct DevnetSpec {
     pub bootnode_count: u32,
 }
 
-/// A client type and its share of the total validator count (as a percentage).
+/// A client type and how many instances (pods) to run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAllocation {
     pub name: String,
-    pub percentage: u32,
+    pub instances: u32,
 }
 
 impl DevnetSpec {
-    /// Compute how many validators each client gets, distributing remainders
-    /// to the first client(s) in order.
+    /// Return (client_name, validator_count) for each client.
+    /// Each instance gets `validators_per_pod` validators.
     pub fn validator_counts(&self) -> Vec<(String, u32)> {
-        let total_pct: u32 = self.clients.iter().map(|c| c.percentage).sum();
-        assert!(total_pct == 100, "Client percentages must sum to 100, got {total_pct}");
-
-        let mut counts: Vec<(String, u32)> = self
-            .clients
+        self.clients
             .iter()
-            .map(|c| {
-                let count = (self.validators as u64 * c.percentage as u64 / 100) as u32;
-                (c.name.clone(), count)
-            })
-            .collect();
+            .map(|c| (c.name.clone(), c.instances * self.validators_per_pod))
+            .collect()
+    }
 
-        let assigned: u32 = counts.iter().map(|(_, c)| *c).sum();
-        let remainder = self.validators - assigned;
-        for i in 0..remainder as usize {
-            counts[i].1 += 1;
-        }
+    /// Total number of validators across all clients.
+    pub fn total_validators(&self) -> u32 {
+        self.clients.iter().map(|c| c.instances).sum::<u32>() * self.validators_per_pod
+    }
+}
 
-        counts
+/// Parse a client spec string like "ream", "zeam:2", or "grandine:5".
+pub fn parse_client_spec(spec: &str) -> anyhow::Result<ClientAllocation> {
+    let parts: Vec<&str> = spec.split(':').collect();
+    match parts.len() {
+        1 => Ok(ClientAllocation {
+            name: parts[0].to_string(),
+            instances: 1,
+        }),
+        2 => Ok(ClientAllocation {
+            name: parts[0].to_string(),
+            instances: parts[1]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid instance count in '{spec}'"))?,
+        }),
+        _ => anyhow::bail!("Invalid client spec '{spec}'. Use 'name' or 'name:count'"),
     }
 }

@@ -11,58 +11,67 @@ pub struct StatusArgs {
 }
 
 pub fn run(args: StatusArgs) -> Result<()> {
-    println!("==> Pod status in namespace '{}':\n", args.namespace);
+    // Check if a cluster is reachable
+    let check = Command::new("kubectl")
+        .args(["cluster-info"])
+        .output()
+        .context("kubectl not found")?;
+
+    if !check.status.success() {
+        println!("No cluster running. Start a devnet with: leanstart ream zeam:2");
+        return Ok(());
+    }
 
     let output = Command::new("kubectl")
         .args([
-            "get",
-            "pods",
-            "-n",
-            &args.namespace,
-            "-o",
-            "wide",
+            "get", "pods", "-n", &args.namespace,
+            "-o", "wide",
             "--sort-by=.metadata.name",
         ])
-        .output()
-        .context("Failed to run kubectl")?;
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("kubectl error: {stderr}");
-    } else {
-        print!("{}", String::from_utf8_lossy(&output.stdout));
+        if stderr.contains("not found") {
+            println!("No devnet running in namespace '{}'.", args.namespace);
+        } else {
+            eprintln!("{stderr}");
+        }
+        return Ok(());
     }
 
-    // Summary by client type
-    println!("\n==> Summary:");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() || stdout.contains("No resources found") {
+        println!("No pods running in namespace '{}'.", args.namespace);
+        return Ok(());
+    }
+
+    print!("{stdout}");
+
+    // Summary
     let output = Command::new("kubectl")
         .args([
-            "get",
-            "pods",
-            "-n",
-            &args.namespace,
-            "-o",
-            "jsonpath={range .items[*]}{.metadata.labels.app}{\"\\t\"}{.status.phase}{\"\\n\"}{end}",
+            "get", "pods", "-n", &args.namespace,
+            "-o", "jsonpath={range .items[*]}{.metadata.labels.app}{\"\\t\"}{.status.phase}{\"\\n\"}{end}",
         ])
-        .output()
-        .context("Failed to run kubectl")?;
+        .output()?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut running = 0u32;
         let mut pending = 0u32;
-        let mut failed = 0u32;
+        let mut other = 0u32;
         for line in stdout.lines() {
             if line.contains("Running") {
                 running += 1;
             } else if line.contains("Pending") {
                 pending += 1;
             } else if !line.is_empty() {
-                failed += 1;
+                other += 1;
             }
         }
-        let total = running + pending + failed;
-        println!("  Total: {total}  Running: {running}  Pending: {pending}  Other: {failed}");
+        let total = running + pending + other;
+        println!("\n{running}/{total} running");
     }
 
     Ok(())

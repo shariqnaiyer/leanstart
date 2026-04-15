@@ -17,8 +17,11 @@ data:
     cp -r /genesis-data/* /config/ 2>/dev/null || true
 
     echo "==> Copying node key from secret..."
-    # Convert pod name (e.g. ethlambda-0) to node name (e.g. ethlambda_0)
-    NODE_NAME=$(echo "$POD_NAME" | sed 's/-/_/g')
+    # Pod name is e.g. "ream-0-0" (StatefulSet "ream-0", ordinal 0).
+    # Strip the trailing "-0" ordinal, then convert hyphens to underscores
+    # to get the node name matching validator-config.yaml (e.g. "ream_0").
+    STATEFULSET_NAME=$(echo "$POD_NAME" | sed 's/-[0-9]*$//')
+    NODE_NAME=$(echo "$STATEFULSET_NAME" | sed 's/-/_/g')
     cp /keys/node.key "/config/${NODE_NAME}.key" 2>/dev/null || true
 
     echo "==> Init complete. Files in /config:"

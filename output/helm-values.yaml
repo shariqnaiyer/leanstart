@@ -5,7 +5,7 @@ genesis:
   storageClass: ''
   storageSize: 5Gi
 clients:
-- name: ream
+- name: ream-0
   image: snaiyer1/ream:latest
   replicas: 1
   args:
@@ -36,46 +36,426 @@ clients:
     - --is-aggregator
   seccompUnconfined: false
   hasHttpPort: true
-- name: zeam-node0
-  image: zeam:local
+- name: ream-1
+  image: snaiyer1/ream:latest
   replicas: 1
   args:
-  - - node
-    - --custom_genesis
-    - /config
-    - --validator_config
-    - /config
-    - --data-dir
+  - - --data-dir
     - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
     - --node-id
-    - zeam_0
-    - --node-key
-    - /config/zeam_0.key
-    - --metrics_enable
-    - --api-port
+    - ream_1
+    - --private-key-path
+    - /config/ream_1.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
     - '8080'
-  seccompUnconfined: true
-  hasHttpPort: false
-- name: zeam-node1
-  image: zeam:local
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-2
+  image: snaiyer1/ream:latest
   replicas: 1
   args:
-  - - node
-    - --custom_genesis
-    - /config
-    - --validator_config
-    - /config
-    - --data-dir
+  - - --data-dir
     - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
     - --node-id
-    - zeam_1
-    - --node-key
-    - /config/zeam_1.key
-    - --metrics_enable
-    - --api-port
+    - ream_2
+    - --private-key-path
+    - /config/ream_2.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
     - '8080'
-  seccompUnconfined: true
-  hasHttpPort: false
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-3
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_3
+    - --private-key-path
+    - /config/ream_3.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-4
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_4
+    - --private-key-path
+    - /config/ream_4.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-5
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_5
+    - --private-key-path
+    - /config/ream_5.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-6
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_6
+    - --private-key-path
+    - /config/ream_6.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-7
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_7
+    - --private-key-path
+    - /config/ream_7.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-8
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_8
+    - --private-key-path
+    - /config/ream_8.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-9
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_9
+    - --private-key-path
+    - /config/ream_9.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-10
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_10
+    - --private-key-path
+    - /config/ream_10.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-11
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_11
+    - --private-key-path
+    - /config/ream_11.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-12
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_12
+    - --private-key-path
+    - /config/ream_12.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-13
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_13
+    - --private-key-path
+    - /config/ream_13.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+- name: ream-14
+  image: snaiyer1/ream:latest
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/annotated_validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_14
+    - --private-key-path
+    - /config/ream_14.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
 initScripts:
   resolverImage: busybox:1.36
 bootnodeCount: 5

@@ -7,7 +7,7 @@ validators:
 - name: ream_0
   privkey: fea1acdf20d67d3e49b049f539ffade77519b012967f65826ac0e01408bd926a
   enrFields:
-    ip: 0.0.0.0
+    ip: "10.244.0.14"
     quic: 9000
   metricsPort: 8080
   httpPort: 5055
@@ -16,17 +16,126 @@ validators:
 - name: ream_1
   privkey: 43960e5250ddfb8daee63482a30e817d6498f05d84b4c1765681e0162911748b
   enrFields:
-    ip: 0.0.0.0
+    ip: "10.244.0.11"
     quic: 9000
   metricsPort: 8080
   httpPort: 5055
   isAggregator: false
   count: 1
-- name: zeam_0
+- name: ream_2
   privkey: a9fb08175ba274f22254c23ad30e6e6fdec0e1a2405c53ca83cd43dcd210c049
   enrFields:
-    ip: 0.0.0.0
+    ip: "10.244.0.13"
     quic: 9000
   metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_3
+  privkey: 5d01e5520fd9dfa154d87b8dfb5dfac75e87b4299978f7cd545b962c9d918dea
+  enrFields:
+    ip: "10.244.0.17"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_4
+  privkey: 8a0952364da3a2095fef91ce36a89e3a8ff055da5cd80235c8f742f030b4216a
+  enrFields:
+    ip: "10.244.0.19"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_5
+  privkey: 16ff9ec123d08695b95fef343d4e637c8a2d9e5cedc9938ca9f4bbeac22bec25
+  enrFields:
+    ip: "10.244.0.21"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_6
+  privkey: 04a29db8783c82ed1724ca1f6d8cfb8a2ddf4f018550f23fc55e756a1363af85
+  enrFields:
+    ip: "10.244.0.22"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_7
+  privkey: 0d2d4c1e15f77e84430109f899e2690c51b101ec1f3e644dabcce66fd2492e07
+  enrFields:
+    ip: "10.244.0.25"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_8
+  privkey: fa869ced3da0ac516dc0327556970fc55bcf11be1f474c4bb44580f83916fedc
+  enrFields:
+    ip: "10.244.0.27"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_9
+  privkey: 7fe60423ab4fff29b8f88d73e87eb87daa9990ea28b92934c720450bd0185ab0
+  enrFields:
+    ip: "10.244.0.29"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_10
+  privkey: 6395e4778913cd65524a3c760be9d032987a562d7ae60673803c69c80912766b
+  enrFields:
+    ip: "10.244.0.31"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_11
+  privkey: 8391193db34ae4ee388716ac6941b63684f66d7c9ae72bbae2c16b835a7c99a0
+  enrFields:
+    ip: "10.244.0.33"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_12
+  privkey: da77155856652fc6041b191107a3839921674944d2046bfe06c9a36785131d54
+  enrFields:
+    ip: "10.244.0.34"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_13
+  privkey: 5e871397e5bddce02c5a341f6452d1bce312ab197b5b36763ba3e0a0fdb7c087
+  enrFields:
+    ip: "10.244.0.35"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
+  isAggregator: false
+  count: 1
+- name: ream_14
+  privkey: c1c48847c70d544c035fd3ef9c8f2e52927bd377c2ae6cfdcecd23f44529b180
+  enrFields:
+    ip: "10.244.0.36"
+    quic: 9000
+  metricsPort: 8080
+  httpPort: 5055
   isAggregator: false
   count: 1

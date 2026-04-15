@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Args;
 
 #[derive(Debug, Args)]
@@ -13,51 +13,41 @@ pub struct DestroyArgs {
     #[arg(long, default_value = "lean-devnet")]
     pub release: String,
 
-    /// Keep PVCs (only delete the Helm release).
-    #[arg(long)]
-    pub keep_pvcs: bool,
+    /// Kind cluster name.
+    #[arg(long, default_value = "lean-devnet")]
+    pub cluster: String,
 }
 
 pub fn run(args: DestroyArgs) -> Result<()> {
-    println!("==> Uninstalling Helm release '{}'...", args.release);
+    // Step 1: Scale down all StatefulSets
+    println!("==> Scaling down all pods...");
+    let _ = Command::new("kubectl")
+        .args([
+            "scale", "statefulset", "--all",
+            "-n", &args.namespace,
+            "--replicas=0",
+        ])
+        .status();
 
-    let status = Command::new("helm")
+    // Step 2: Uninstall Helm release
+    println!("==> Uninstalling Helm release '{}'...", args.release);
+    let _ = Command::new("helm")
         .args(["uninstall", &args.release, "-n", &args.namespace])
         .status()
         .context("Failed to run helm")?;
 
-    if !status.success() {
-        bail!("helm uninstall failed");
-    }
+    // Step 3: Delete the kind cluster
+    println!("==> Deleting kind cluster '{}'...", args.cluster);
+    let status = Command::new("kind")
+        .args(["delete", "cluster", "--name", &args.cluster])
+        .status()
+        .context("Failed to run kind")?;
 
-    // Clean up pod secrets
-    println!("==> Cleaning up pod secrets...");
-    let _ = Command::new("kubectl")
-        .args([
-            "delete",
-            "secrets",
-            "-n",
-            &args.namespace,
-            "-l",
-            "app.kubernetes.io/part-of=lean-devnet",
-        ])
-        .status();
-
-    if !args.keep_pvcs {
-        println!("==> Deleting PVCs...");
-        let _ = Command::new("kubectl")
-            .args([
-                "delete",
-                "pvc",
-                "--all",
-                "-n",
-                &args.namespace,
-            ])
-            .status();
+    if status.success() {
+        println!("\nDestroyed cluster '{}'.", args.cluster);
     } else {
-        println!("  PVCs preserved (--keep-pvcs).");
+        println!("\nNo kind cluster '{}' found (may already be deleted).", args.cluster);
     }
 
-    println!("\n✓ Destroyed release '{}' in namespace '{}'.", args.release, args.namespace);
     Ok(())
 }

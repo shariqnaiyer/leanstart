@@ -57,35 +57,32 @@ pub struct PrometheusValues {
 }
 
 /// Generate Helm values.yaml from DevnetSpec and ValidatorConfig.
+///
+/// Each validator entry becomes its own StatefulSet with replicas=1,
+/// ensuring every pod gets its correct per-pod args (node-id, keys, etc).
 pub fn generate_helm_values(
     spec: &DevnetSpec,
     vc: &ValidatorConfig,
 ) -> Result<HelmValues> {
-    let client_counts = spec.validator_counts();
     let mut clients = Vec::new();
-    let mut vc_idx = 0; // index into vc.validators
 
-    for (client_name, _validator_count) in &client_counts {
+    for (vc_idx, entry) in vc.validators.iter().enumerate() {
+        // Extract client type from name (e.g. "zeam_1" -> "zeam")
+        let client_name = entry
+            .name
+            .rsplit_once('_')
+            .map(|(name, _)| name)
+            .unwrap_or(&entry.name);
+
         let client_def = get_client(client_name).unwrap();
-        let pod_count = vc
-            .validators
-            .iter()
-            .filter(|v| v.name.starts_with(&format!("{client_name}_")))
-            .count() as u32;
 
-        let mut per_pod_args = Vec::new();
-        for _pod_idx in 0..pod_count {
-            let entry = &vc.validators[vc_idx];
-            let args = build_args(
-                client_def,
-                &entry.name,
-                vc_idx,
-                entry.is_aggregator,
-                None,
-            );
-            per_pod_args.push(args);
-            vc_idx += 1;
-        }
+        let args = build_args(
+            client_def,
+            &entry.name,
+            vc_idx,
+            entry.is_aggregator,
+            None,
+        );
 
         let image = if client_def.arch_aware {
             format!("{}-amd64", client_def.image)
@@ -93,11 +90,14 @@ pub fn generate_helm_values(
             client_def.image.to_string()
         };
 
+        // K8s-safe name: zeam_0 -> zeam-0
+        let k8s_name = entry.name.replace('_', "-");
+
         clients.push(ClientValues {
-            name: client_name.clone(),
+            name: k8s_name,
             image,
-            replicas: pod_count,
-            args: per_pod_args,
+            replicas: 1,
+            args: vec![args],
             seccomp_unconfined: client_def.seccomp_unconfined,
             has_http_port: client_def.has_http_port,
         });

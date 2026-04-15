@@ -4,23 +4,19 @@ use anyhow::{Context, Result};
 use clap::Args;
 
 use crate::config::generator::{generate_validator_config, write_validator_config};
-use crate::config::spec::{ClientAllocation, DevnetSpec};
+use crate::config::spec::{DevnetSpec, parse_client_spec};
 use crate::genesis::runner::{append_genesis_validators, run_genesis_tool, write_config_yaml};
 use crate::k8s::values::{generate_helm_values, generate_pod_secrets, write_helm_values};
 use crate::keys::keygen::{generate_hash_sig_keys, write_node_keys};
 
 #[derive(Debug, Args)]
 pub struct GenerateArgs {
-    /// Total number of validators.
-    #[arg(long, default_value = "100")]
-    pub validators: u32,
-
-    /// Client allocations as "name:pct,name:pct,..." (must sum to 100).
-    #[arg(long, default_value = "ethlambda:50,qlean:50")]
+    /// Client specs: "ream:1", "zeam:2", etc. (same as `run`).
+    #[arg(long, default_value = "ethlambda:1,qlean:1")]
     pub clients: String,
 
     /// Validators per Kubernetes pod.
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value = "1")]
     pub validators_per_pod: u32,
 
     /// Kubernetes namespace.
@@ -61,24 +57,6 @@ pub struct GenerateArgs {
 }
 
 impl GenerateArgs {
-    fn parse_clients(&self) -> Result<Vec<ClientAllocation>> {
-        self.clients
-            .split(',')
-            .map(|s| {
-                let parts: Vec<&str> = s.trim().split(':').collect();
-                if parts.len() != 2 {
-                    anyhow::bail!("Invalid client allocation: '{s}'. Expected 'name:percentage'");
-                }
-                Ok(ClientAllocation {
-                    name: parts[0].to_string(),
-                    percentage: parts[1]
-                        .parse()
-                        .with_context(|| format!("Invalid percentage in '{s}'"))?,
-                })
-            })
-            .collect()
-    }
-
     fn parse_seed(&self) -> Result<[u8; 32]> {
         let bytes = hex::decode(&self.seed).context("Invalid hex seed")?;
         let arr: [u8; 32] = bytes
@@ -89,9 +67,14 @@ impl GenerateArgs {
 }
 
 pub fn run(args: GenerateArgs) -> Result<()> {
+    let clients: Vec<_> = args
+        .clients
+        .split(',')
+        .map(|s| parse_client_spec(s.trim()))
+        .collect::<Result<_>>()?;
+
     let spec = DevnetSpec {
-        validators: args.validators,
-        clients: args.parse_clients()?,
+        clients,
         validators_per_pod: args.validators_per_pod,
         namespace: args.namespace.clone(),
         output_dir: args.output_dir.clone(),
@@ -145,6 +128,6 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     println!("==> Generating pod secret manifests...");
     generate_pod_secrets(&vc, &spec.namespace, &args.output_dir)?;
 
-    println!("\n✓ Generation complete. Output in {}", args.output_dir.display());
+    println!("\nGeneration complete. Output in {}", args.output_dir.display());
     Ok(())
 }
