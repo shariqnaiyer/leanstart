@@ -1,0 +1,59 @@
+namespace: lean-devnet
+genesis:
+  configMapName: genesis-config
+  pvcName: genesis-data
+  storageClass: ''
+  storageSize: 5Gi
+clients:
+- name: ethlambda
+  image: ghcr.io/lambdaclass/ethlambda:devnet3
+  replicas: 1
+  args:
+  - - --custom-network-config-dir
+    - /config
+    - --gossipsub-port
+    - '9000'
+    - --node-id
+    - ethlambda_0
+    - --node-key
+    - /config/ethlambda_0.key
+    - --metrics-port
+    - '8080'
+    - --is-aggregator
+  seccompUnconfined: false
+  hasHttpPort: false
+- name: ream
+  image: ghcr.io/reamlabs/ream:latest-devnet3
+  replicas: 1
+  args:
+  - - --data-dir
+    - /data
+    - lean_node
+    - --network
+    - /config/config.yaml
+    - --validator-registry-path
+    - /config/validators.yaml
+    - --bootnodes
+    - /config/nodes.yaml
+    - --node-id
+    - ream_0
+    - --node-key
+    - /config/ream_0.key
+    - --socket-port
+    - '9000'
+    - --metrics
+    - --metrics-address
+    - 0.0.0.0
+    - --metrics-port
+    - '8080'
+    - --http-address
+    - 0.0.0.0
+    - --http-port
+    - '5055'
+  seccompUnconfined: false
+  hasHttpPort: true
+initScripts:
+  resolverImage: busybox:1.36
+bootnodeCount: 5
+prometheus:
+  enabled: false

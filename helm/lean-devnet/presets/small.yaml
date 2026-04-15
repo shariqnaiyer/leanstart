@@ -1,0 +1,6 @@
+# Small devnet: 10 validators, 2 client types
+# Usage: lean-devnet generate --validators 10 --clients "ethlambda:50,qlean:50" --validators-per-pod 5
+namespace: lean-devnet-small
+genesis:
+  storageSize: 1Gi
+bootnodeCount: 2

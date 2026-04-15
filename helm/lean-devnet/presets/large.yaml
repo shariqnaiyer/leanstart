@@ -1,0 +1,6 @@
+# Large devnet: 10000 validators, 7 client types
+# Usage: lean-devnet generate --validators 10000 --clients "ethlambda:15,qlean:15,ream:14,zeam:14,grandine:14,lantern:14,lighthouse:14" --validators-per-pod 100
+namespace: lean-devnet-large
+genesis:
+  storageSize: 20Gi
+bootnodeCount: 5

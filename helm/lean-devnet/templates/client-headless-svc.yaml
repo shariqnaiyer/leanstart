@@ -1,0 +1,30 @@
+{{- range .Values.clients }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}-headless
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "lean-devnet.labels" $ | nindent 4 }}
+    app: {{ .name }}
+spec:
+  clusterIP: None
+  selector:
+    app: {{ .name }}
+  ports:
+    - name: quic
+      port: 9000
+      targetPort: 9000
+      protocol: UDP
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    {{- if .hasHttpPort }}
+    - name: http
+      port: 5055
+      targetPort: 5055
+      protocol: TCP
+    {{- end }}
+{{- end }}

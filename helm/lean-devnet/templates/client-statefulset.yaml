@@ -1,0 +1,116 @@
+{{- range $idx, $client := .Values.clients }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $client.name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "lean-devnet.labels" $ | nindent 4 }}
+    app: {{ $client.name }}
+spec:
+  serviceName: {{ $client.name }}-headless
+  replicas: {{ $client.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: {{ $client.name }}
+      app.kubernetes.io/part-of: lean-devnet
+  template:
+    metadata:
+      labels:
+        app: {{ $client.name }}
+        app.kubernetes.io/part-of: lean-devnet
+    spec:
+      initContainers:
+        - name: resolve-peers
+          image: {{ $.Values.initScripts.resolverImage }}
+          command: ["/bin/sh", "/scripts/resolve-peers.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              value: {{ $.Values.namespace }}
+            - name: BOOTNODE_COUNT
+              value: "{{ $.Values.bootnodeCount }}"
+          volumeMounts:
+            - name: config-shared
+              mountPath: /config-shared
+              readOnly: true
+            - name: genesis-data
+              mountPath: /genesis-data
+              readOnly: true
+            - name: init-scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: resolved-config
+              mountPath: /config
+            - name: node-keys
+              mountPath: /keys
+              readOnly: true
+      containers:
+        - name: {{ $client.name }}
+          image: {{ $client.image }}
+          {{- if (index $client.args 0) }}
+          args:
+            {{- /*
+              Pod-specific args are pre-computed per replica index.
+              At deploy time, all replicas use args[0] as a baseline;
+              the init container patches the node-id from POD_NAME.
+              For full per-pod args, use an ordinal-aware entrypoint.
+            */ -}}
+            {{- range (index $client.args 0) }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if $client.seccompUnconfined }}
+          securityContext:
+            seccompProfile:
+              type: Unconfined
+          {{- end }}
+          ports:
+            - containerPort: 9000
+              protocol: UDP
+              name: quic
+            - containerPort: 8080
+              protocol: TCP
+              name: metrics
+            {{- if $client.hasHttpPort }}
+            - containerPort: 5055
+              protocol: TCP
+              name: http
+            {{- end }}
+          volumeMounts:
+            - name: resolved-config
+              mountPath: /config
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config-shared
+          configMap:
+            name: {{ $.Values.genesis.configMapName }}
+        - name: genesis-data
+          persistentVolumeClaim:
+            claimName: {{ $.Values.genesis.pvcName }}
+        - name: init-scripts
+          configMap:
+            name: init-scripts
+            defaultMode: 0755
+        - name: resolved-config
+          emptyDir: {}
+        - name: node-keys
+          secret:
+            secretName: {{ $client.name }}-keys
+            optional: true
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+{{- end }}

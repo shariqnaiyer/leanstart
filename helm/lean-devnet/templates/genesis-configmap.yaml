@@ -1,0 +1,10 @@
+{{- if not .Values.genesis.external }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.genesis.configMapName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "lean-devnet.labels" . | nindent 4 }}
+data: {}
+{{- end }}

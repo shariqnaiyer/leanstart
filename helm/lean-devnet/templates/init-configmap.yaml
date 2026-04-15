@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-scripts
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "lean-devnet.labels" . | nindent 4 }}
+data:
+  resolve-peers.sh: |
+    #!/bin/sh
+    set -e
+
+    echo "==> Copying shared config to working directory..."
+    cp /config-shared/* /config/ 2>/dev/null || true
+
+    echo "==> Copying genesis data from PVC..."
+    cp -r /genesis-data/* /config/ 2>/dev/null || true
+
+    echo "==> Copying node key from secret..."
+    # Convert pod name (e.g. ethlambda-0) to node name (e.g. ethlambda_0)
+    NODE_NAME=$(echo "$POD_NAME" | sed 's/-/_/g')
+    cp /keys/node.key "/config/${NODE_NAME}.key" 2>/dev/null || true
+
+    echo "==> Init complete. Files in /config:"
+    ls -la /config/
+    ls -la /config/hash-sig-keys/ 2>/dev/null || echo "  (no hash-sig-keys directory)"

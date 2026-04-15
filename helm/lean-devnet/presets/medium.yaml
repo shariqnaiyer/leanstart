@@ -1,0 +1,6 @@
+# Medium devnet: 1000 validators, 4 client types
+# Usage: lean-devnet generate --validators 1000 --clients "ethlambda:25,qlean:25,grandine:25,lantern:25" --validators-per-pod 100
+namespace: lean-devnet-medium
+genesis:
+  storageSize: 5Gi
+bootnodeCount: 3
