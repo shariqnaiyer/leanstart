@@ -4,15 +4,16 @@ config:
   activeEpoch: 18
   keyType: hash-sig
 validators:
-- name: ethlambda_0
+- name: ream_0
   privkey: fea1acdf20d67d3e49b049f539ffade77519b012967f65826ac0e01408bd926a
   enrFields:
     ip: 0.0.0.0
     quic: 9000
   metricsPort: 8080
+  httpPort: 5055
   isAggregator: true
-  count: 3
-- name: ream_0
+  count: 1
+- name: ream_1
   privkey: 43960e5250ddfb8daee63482a30e817d6498f05d84b4c1765681e0162911748b
   enrFields:
     ip: 0.0.0.0
@@ -20,4 +21,12 @@ validators:
   metricsPort: 8080
   httpPort: 5055
   isAggregator: false
-  count: 2
+  count: 1
+- name: zeam_0
+  privkey: a9fb08175ba274f22254c23ad30e6e6fdec0e1a2405c53ca83cd43dcd210c049
+  enrFields:
+    ip: 0.0.0.0
+    quic: 9000
+  metricsPort: 8080
+  isAggregator: false
+  count: 1
