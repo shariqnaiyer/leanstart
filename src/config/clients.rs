@@ -45,7 +45,7 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "ream",
-        image: "snaiyer1/ream:latest",
+        image: "ghcr.io/reamlabs/ream:latest-devnet4",
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::None,
@@ -53,7 +53,7 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "zeam",
-        image: "zeam:local",
+        image: "blockblaz/zeam:devnet4",
         arch_aware: false,
         seccomp_unconfined: true,
         hash_sig_mode: HashSigMode::None,
