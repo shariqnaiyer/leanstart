@@ -43,6 +43,9 @@ pub struct ClientValues {
     pub seccomp_unconfined: bool,
     #[serde(rename = "hasHttpPort")]
     pub has_http_port: bool,
+    /// Attestation subnet this pod belongs to (0-based). Surfaced for K8s
+    /// labelling / kubectl filtering when running multi-subnet devnets.
+    pub subnet: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,22 +69,34 @@ pub fn generate_helm_values(
 ) -> Result<HelmValues> {
     let mut clients = Vec::new();
 
-    for (vc_idx, entry) in vc.validators.iter().enumerate() {
-        // Extract client type from name (e.g. "zeam_1" -> "zeam")
-        let client_name = entry
-            .name
-            .rsplit_once('_')
-            .map(|(name, _)| name)
-            .unwrap_or(&entry.name);
+    let multi_subnet = spec.subnets > 1;
+    let committee_count = if multi_subnet || spec.attestation_committee_count.is_some() {
+        Some(spec.effective_committee_count())
+    } else {
+        None
+    };
+    let aggregate_subnet_ids = if multi_subnet {
+        Some(
+            (0..spec.subnets)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+    } else {
+        None
+    };
 
-        let client_def = get_client(client_name).unwrap();
+    for (vc_idx, entry) in vc.validators.iter().enumerate() {
+        let client_def = get_client(&entry.client)
+            .ok_or_else(|| anyhow::anyhow!("Unknown client: {}", entry.client))?;
 
         let args = build_args(
             client_def,
             &entry.name,
             vc_idx,
             entry.is_aggregator,
-            None,
+            committee_count,
+            aggregate_subnet_ids.as_deref(),
         );
 
         let image = if client_def.arch_aware {
@@ -90,7 +105,7 @@ pub fn generate_helm_values(
             client_def.image.to_string()
         };
 
-        // K8s-safe name: zeam_0 -> zeam-0
+        // K8s-safe name: zeam_0 -> zeam-0, zeam_s1_p0 -> zeam-s1-p0
         let k8s_name = entry.name.replace('_', "-");
 
         clients.push(ClientValues {
@@ -100,6 +115,7 @@ pub fn generate_helm_values(
             args: vec![args],
             seccomp_unconfined: client_def.seccomp_unconfined,
             has_http_port: client_def.has_http_port,
+            subnet: entry.subnet,
         });
     }
 

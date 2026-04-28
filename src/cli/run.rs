@@ -2,12 +2,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::{fs, thread, time};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::Args;
 
 use crate::config::clients::{get_client, CLIENTS};
-use crate::config::generator::{generate_validator_config, write_validator_config, ValidatorConfig};
-use crate::config::spec::{ClientAllocation, DevnetSpec, parse_client_spec};
+use crate::config::generator::{
+    generate_validator_config, write_validator_config, ValidatorConfig,
+};
+use crate::config::spec::{parse_client_spec, ClientAllocation, DevnetSpec, MAX_SUBNETS};
 use crate::k8s::values::{generate_helm_values, generate_pod_secrets, write_helm_values};
 use crate::keys::keygen::write_node_keys;
 
@@ -52,7 +54,10 @@ pub struct RunArgs {
     pub genesis_offset: u32,
 
     /// Hex-encoded 32-byte seed for deterministic key generation.
-    #[arg(long, default_value = "0000000000000000000000000000000000000000000000000000000000000001")]
+    #[arg(
+        long,
+        default_value = "0000000000000000000000000000000000000000000000000000000000000001"
+    )]
     pub seed: String,
 
     /// Skip deployment, only generate config files.
@@ -66,9 +71,29 @@ pub struct RunArgs {
     /// Number of bootnode pods per client type.
     #[arg(long, default_value = "5")]
     pub bootnode_count: u32,
+
+    /// Number of attestation subnets (1..=5). Each client allocation is
+    /// replicated once per subnet and one aggregator per subnet is selected.
+    #[arg(long, default_value = "1")]
+    pub subnets: u32,
+
+    /// Override config.attestation_committee_count. Defaults to --subnets.
+    #[arg(long)]
+    pub attestation_committee_count: Option<u32>,
 }
 
 pub fn run(args: RunArgs) -> Result<()> {
+    // Tee all stdout/stderr (including subprocess output) to a log file so the
+    // user has a complete record of the run.
+    let log_path = crate::logging::init(&args.output_dir)?;
+    println!("Logging this run to {}", log_path.display());
+
+    let result = run_inner(args);
+    crate::logging::shutdown();
+    result
+}
+
+fn run_inner(args: RunArgs) -> Result<()> {
     let clients: Vec<ClientAllocation> = args
         .clients
         .iter()
@@ -78,14 +103,36 @@ pub fn run(args: RunArgs) -> Result<()> {
     for c in &clients {
         if get_client(&c.name).is_none() {
             let known: Vec<&str> = CLIENTS.iter().map(|c| c.name).collect();
-            bail!("Unknown client '{}'. Known clients: {}", c.name, known.join(", "));
+            bail!(
+                "Unknown client '{}'. Known clients: {}",
+                c.name,
+                known.join(", ")
+            );
         }
     }
 
-    let total_instances: u32 = clients.iter().map(|c| c.instances).sum();
+    if args.subnets == 0 || args.subnets > MAX_SUBNETS {
+        bail!(
+            "--subnets must be between 1 and {} (got {})",
+            MAX_SUBNETS,
+            args.subnets
+        );
+    }
+
+    let total_instances: u32 = clients.iter().map(|c| c.instances).sum::<u32>() * args.subnets;
     let total_validators = total_instances * args.validators_per_pod;
 
-    println!("Devnet: {} instances, {} validators", total_instances, total_validators);
+    if args.subnets > 1 {
+        println!(
+            "Devnet: {} subnets, {} pods, {} validators",
+            args.subnets, total_instances, total_validators
+        );
+    } else {
+        println!(
+            "Devnet: {} instances, {} validators",
+            total_instances, total_validators
+        );
+    }
     for c in &clients {
         let def = get_client(&c.name).unwrap();
         println!("  {} x{} ({})", c.name, c.instances, def.image);
@@ -111,6 +158,8 @@ pub fn run(args: RunArgs) -> Result<()> {
         genesis_offset: args.genesis_offset,
         storage_class: args.storage_class.clone(),
         bootnode_count: args.bootnode_count,
+        subnets: args.subnets,
+        attestation_committee_count: args.attestation_committee_count,
     };
 
     let genesis_dir = args.output_dir.join("genesis");
@@ -159,21 +208,56 @@ pub fn run(args: RunArgs) -> Result<()> {
     // Step 6: Create K8s resources and deploy
     println!("==> Deploying to Kubernetes...");
     let context = format!("kind-{}", args.cluster);
-    setup_k8s_resources(&context, &args.namespace, &vc, &genesis_dir, &args.output_dir)?;
+    setup_k8s_resources(
+        &context,
+        &args.namespace,
+        &vc,
+        &genesis_dir,
+        &args.output_dir,
+    )?;
     helm_install(&context, &args.namespace, &chart_dir, &args.output_dir)?;
+
+    // Derive expected pod names from the validator config.
+    let pod_names: Vec<(String, String)> = vc
+        .validators
+        .iter()
+        .map(|e| {
+            let k8s_name = e.name.replace('_', "-");
+            (format!("{k8s_name}-0"), e.name.clone())
+        })
+        .collect();
 
     // Step 7: Wait for pods, fix peer IPs
     println!("==> Waiting for pods...");
-    let pod_names = wait_for_pods(&context, &args.namespace, &vc)?;
+    if let Err(e) = wait_for_pods(&context, &args.namespace, &vc) {
+        // Snapshot --previous logs for any pod that crashed so the user has a
+        // record on disk before we bail (streaming hasn't started yet).
+        snapshot_previous_logs(&context, &args.namespace, &pod_names, &args.output_dir);
+        eprintln!(
+            "\nSome pods failed to become ready. Check {}/logs/ for details.",
+            args.output_dir.display()
+        );
+        return Err(e);
+    }
 
     println!("==> Fixing peer discovery...");
     fix_peer_ips(
-        &context, &args.namespace, &args.cluster,
-        &vc, &genesis_dir, &genesis_script, &pod_names,
+        &context,
+        &args.namespace,
+        &args.cluster,
+        &vc,
+        &genesis_dir,
+        &genesis_script,
+        &pod_names,
     )?;
 
-    // Step 8: Start log streaming to disk
-    println!("==> Streaming logs to {}/logs/...", args.output_dir.display());
+    // Stream logs AFTER fix_peer_ips: that step kills and restarts containers
+    // to apply the corrected peer IPs, and we want to follow the post-restart
+    // containers (the long-running ones), not the short-lived initial ones.
+    println!(
+        "==> Streaming logs to {}/logs/...",
+        args.output_dir.display()
+    );
     start_log_streaming(&context, &args.namespace, &pod_names, &args.output_dir)?;
 
     // Done
@@ -302,9 +386,7 @@ fn load_images_into_kind(spec: &DevnetSpec, cluster: &str) -> Result<()> {
             .output()?;
         if !check.status.success() {
             println!("    Pulling from registry...");
-            let status = Command::new("docker")
-                .args(["pull", image])
-                .status()?;
+            let status = Command::new("docker").args(["pull", image]).status()?;
             if !status.success() {
                 bail!("Failed to pull image {image}. Build or pull it first.");
             }
@@ -347,20 +429,38 @@ fn setup_k8s_resources(
     // Create namespace with Helm labels, wait for service account
     let _ = kc(&["create", "namespace", namespace]);
     thread::sleep(time::Duration::from_secs(3));
-    let _ = kc(&["label", "namespace", namespace, "app.kubernetes.io/managed-by=Helm", "--overwrite"]);
-    let _ = kc(&["annotate", "namespace", namespace,
+    let _ = kc(&[
+        "label",
+        "namespace",
+        namespace,
+        "app.kubernetes.io/managed-by=Helm",
+        "--overwrite",
+    ]);
+    let _ = kc(&[
+        "annotate",
+        "namespace",
+        namespace,
         &format!("meta.helm.sh/release-name={namespace}"),
         &format!("meta.helm.sh/release-namespace={namespace}"),
-        "--overwrite"]);
+        "--overwrite",
+    ]);
 
     // Create ConfigMap with all genesis files
     let mut cm_args = vec![
-        "create".to_string(), "configmap".to_string(), "genesis-config".to_string(),
-        "-n".to_string(), namespace.to_string(),
+        "create".to_string(),
+        "configmap".to_string(),
+        "genesis-config".to_string(),
+        "-n".to_string(),
+        namespace.to_string(),
     ];
     let genesis_files = [
-        "config.yaml", "validators.yaml", "annotated_validators.yaml",
-        "nodes.yaml", "genesis.json", "genesis.ssz", "validator-config.yaml",
+        "config.yaml",
+        "validators.yaml",
+        "annotated_validators.yaml",
+        "nodes.yaml",
+        "genesis.json",
+        "genesis.ssz",
+        "validator-config.yaml",
     ];
     for f in &genesis_files {
         let path = genesis_dir.join(f);
@@ -372,7 +472,11 @@ fn setup_k8s_resources(
     for entry in &vc.validators {
         let key_path = genesis_dir.join(format!("{}.key", entry.name));
         if key_path.exists() {
-            cm_args.push(format!("--from-file={}.key={}", entry.name, key_path.display()));
+            cm_args.push(format!(
+                "--from-file={}.key={}",
+                entry.name,
+                key_path.display()
+            ));
         }
     }
     let cm_refs: Vec<&str> = cm_args.iter().map(|s| s.as_str()).collect();
@@ -401,24 +505,50 @@ fn setup_k8s_resources(
             .args(["--context", context, "apply", "-n", namespace, "-f", "-"])
             .stdin(std::process::Stdio::piped())
             .spawn()?;
-        child.stdin.take().unwrap().write_all(loader_yaml.as_bytes())?;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(loader_yaml.as_bytes())?;
         child.wait()?;
 
         // Wait for loader pod
         let _ = Command::new("kubectl")
-            .args(["--context", context, "wait", "--for=condition=ready",
-                   "pod/genesis-loader", "-n", namespace, "--timeout=60s"])
+            .args([
+                "--context",
+                context,
+                "wait",
+                "--for=condition=ready",
+                "pod/genesis-loader",
+                "-n",
+                namespace,
+                "--timeout=60s",
+            ])
             .status()?;
 
         let _ = Command::new("kubectl")
-            .args(["--context", context, "exec", "genesis-loader", "-n", namespace,
-                   "--", "mkdir", "-p", "/genesis/hash-sig-keys"])
+            .args([
+                "--context",
+                context,
+                "exec",
+                "genesis-loader",
+                "-n",
+                namespace,
+                "--",
+                "mkdir",
+                "-p",
+                "/genesis/hash-sig-keys",
+            ])
             .status()?;
 
         let _ = Command::new("kubectl")
-            .args(["--context", context, "cp",
-                   &format!("{}/", hash_sig_dir.display()),
-                   &format!("{namespace}/genesis-loader:/genesis/hash-sig-keys/")])
+            .args([
+                "--context",
+                context,
+                "cp",
+                &format!("{}/", hash_sig_dir.display()),
+                &format!("{namespace}/genesis-loader:/genesis/hash-sig-keys/"),
+            ])
             .status()?;
 
         // Flatten nested dir if kubectl cp created one
@@ -429,7 +559,15 @@ fn setup_k8s_resources(
             .status()?;
 
         let _ = Command::new("kubectl")
-            .args(["--context", context, "delete", "pod", "genesis-loader", "-n", namespace])
+            .args([
+                "--context",
+                context,
+                "delete",
+                "pod",
+                "genesis-loader",
+                "-n",
+                namespace,
+            ])
             .status()?;
     }
 
@@ -437,8 +575,15 @@ fn setup_k8s_resources(
     let secrets_dir = output_dir.join("secrets");
     if secrets_dir.exists() {
         let _ = Command::new("kubectl")
-            .args(["--context", context, "apply", "-f",
-                   &secrets_dir.display().to_string(), "-n", namespace])
+            .args([
+                "--context",
+                context,
+                "apply",
+                "-f",
+                &secrets_dir.display().to_string(),
+                "-n",
+                namespace,
+            ])
             .status()?;
     }
 
@@ -461,12 +606,17 @@ fn helm_install(
 
     let status = Command::new("helm")
         .args([
-            "install", namespace,
+            "install",
+            namespace,
             &chart_dir.display().to_string(),
-            "-f", &values_path.display().to_string(),
-            "--set", "genesis.external=true",
-            "-n", namespace,
-            "--kube-context", context,
+            "-f",
+            &values_path.display().to_string(),
+            "--set",
+            "genesis.external=true",
+            "-n",
+            namespace,
+            "--kube-context",
+            context,
         ])
         .status()
         .context("helm not found. Install with: brew install helm")?;
@@ -495,8 +645,16 @@ fn wait_for_pods(
     for (pod_name, _) in &pods {
         println!("  Waiting for {pod_name}...");
         let status = Command::new("kubectl")
-            .args(["--context", context, "wait", "--for=condition=ready",
-                   &format!("pod/{pod_name}"), "-n", namespace, "--timeout=120s"])
+            .args([
+                "--context",
+                context,
+                "wait",
+                "--for=condition=ready",
+                &format!("pod/{pod_name}"),
+                "-n",
+                namespace,
+                "--timeout=120s",
+            ])
             .status()?;
         if !status.success() {
             bail!("Pod {pod_name} did not become ready");
@@ -522,8 +680,17 @@ fn fix_peer_ips(
     let mut ips: Vec<(String, String)> = Vec::new(); // (entry_name, ip)
     for (pod_name, entry_name) in pods {
         let output = Command::new("kubectl")
-            .args(["--context", context, "get", "pod", pod_name, "-n", namespace,
-                   "-o", "jsonpath={.status.podIP}"])
+            .args([
+                "--context",
+                context,
+                "get",
+                "pod",
+                pod_name,
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.status.podIP}",
+            ])
             .output()?;
         let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
         println!("  {entry_name} -> {ip}");
@@ -549,8 +716,14 @@ fn fix_peer_ips(
     fs::write(&vc_path, &result)?;
 
     // Remove old genesis outputs and regenerate
-    for f in &["config.yaml", "genesis.ssz", "genesis.json", "nodes.yaml",
-               "validators.yaml", "annotated_validators.yaml"] {
+    for f in &[
+        "config.yaml",
+        "genesis.ssz",
+        "genesis.json",
+        "nodes.yaml",
+        "validators.yaml",
+        "annotated_validators.yaml",
+    ] {
         let _ = fs::remove_file(genesis_dir.join(f));
     }
 
@@ -566,17 +739,34 @@ fn fix_peer_ips(
     // init containers re-run on restart, they copy the correct data.
     println!("  Updating ConfigMap with corrected IPs...");
     let _ = Command::new("kubectl")
-        .args(["--context", context, "delete", "configmap", "genesis-config", "-n", namespace])
+        .args([
+            "--context",
+            context,
+            "delete",
+            "configmap",
+            "genesis-config",
+            "-n",
+            namespace,
+        ])
         .status();
 
     let genesis_files = [
-        "config.yaml", "validators.yaml", "annotated_validators.yaml",
-        "nodes.yaml", "genesis.json", "genesis.ssz", "validator-config.yaml",
+        "config.yaml",
+        "validators.yaml",
+        "annotated_validators.yaml",
+        "nodes.yaml",
+        "genesis.json",
+        "genesis.ssz",
+        "validator-config.yaml",
     ];
     let mut cm_args = vec![
-        "--context".to_string(), context.to_string(),
-        "create".to_string(), "configmap".to_string(), "genesis-config".to_string(),
-        "-n".to_string(), namespace.to_string(),
+        "--context".to_string(),
+        context.to_string(),
+        "create".to_string(),
+        "configmap".to_string(),
+        "genesis-config".to_string(),
+        "-n".to_string(),
+        namespace.to_string(),
     ];
     for f in &genesis_files {
         let path = genesis_dir.join(f);
@@ -588,7 +778,11 @@ fn fix_peer_ips(
     for (_, entry_name) in pods {
         let key_path = genesis_dir.join(format!("{entry_name}.key"));
         if key_path.exists() {
-            cm_args.push(format!("--from-file={}.key={}", entry_name, key_path.display()));
+            cm_args.push(format!(
+                "--from-file={}.key={}",
+                entry_name,
+                key_path.display()
+            ));
         }
     }
     let cm_refs: Vec<&str> = cm_args.iter().map(|s| s.as_str()).collect();
@@ -602,10 +796,15 @@ fn fix_peer_ips(
 
         // Try kubectl cp first (works if container has tar)
         let test = Command::new("kubectl")
-            .args(["--context", context, "cp",
-                   &genesis_dir.join("nodes.yaml").display().to_string(),
-                   &format!("{namespace}/{pod_name}:/config/nodes.yaml"),
-                   "-c", &k8s_name])
+            .args([
+                "--context",
+                context,
+                "cp",
+                &genesis_dir.join("nodes.yaml").display().to_string(),
+                &format!("{namespace}/{pod_name}:/config/nodes.yaml"),
+                "-c",
+                &k8s_name,
+            ])
             .output()?;
 
         if test.status.success() {
@@ -613,10 +812,15 @@ fn fix_peer_ips(
                 let src = genesis_dir.join(f);
                 if src.exists() {
                     let _ = Command::new("kubectl")
-                        .args(["--context", context, "cp",
-                               &src.display().to_string(),
-                               &format!("{namespace}/{pod_name}:/config/{f}"),
-                               "-c", &k8s_name])
+                        .args([
+                            "--context",
+                            context,
+                            "cp",
+                            &src.display().to_string(),
+                            &format!("{namespace}/{pod_name}:/config/{f}"),
+                            "-c",
+                            &k8s_name,
+                        ])
                         .status();
                 }
             }
@@ -628,8 +832,11 @@ fn fix_peer_ips(
                         let src = genesis_dir.join(f);
                         if src.exists() {
                             let _ = Command::new("docker")
-                                .args(["cp", &src.display().to_string(),
-                                       &format!("{node}:{mount}/{f}")])
+                                .args([
+                                    "cp",
+                                    &src.display().to_string(),
+                                    &format!("{node}:{mount}/{f}"),
+                                ])
                                 .status();
                         }
                     }
@@ -655,19 +862,40 @@ fn fix_peer_ips(
 
     for (pod_name, _) in pods {
         let _ = Command::new("kubectl")
-            .args(["--context", context, "wait", "--for=condition=ready",
-                   &format!("pod/{pod_name}"), "-n", namespace, "--timeout=60s"])
+            .args([
+                "--context",
+                context,
+                "wait",
+                "--for=condition=ready",
+                &format!("pod/{pod_name}"),
+                "-n",
+                namespace,
+                "--timeout=60s",
+            ])
             .status()?;
     }
 
     // Verify IPs are still correct
     for (pod_name, entry_name) in pods {
         let output = Command::new("kubectl")
-            .args(["--context", context, "get", "pod", pod_name, "-n", namespace,
-                   "-o", "jsonpath={.status.podIP}"])
+            .args([
+                "--context",
+                context,
+                "get",
+                "pod",
+                pod_name,
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.status.podIP}",
+            ])
             .output()?;
         let actual_ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let expected_ip = ips.iter().find(|(n, _)| n == entry_name).map(|(_, ip)| ip.as_str()).unwrap_or("");
+        let expected_ip = ips
+            .iter()
+            .find(|(n, _)| n == entry_name)
+            .map(|(_, ip)| ip.as_str())
+            .unwrap_or("");
         if actual_ip != expected_ip {
             eprintln!("  Warning: {entry_name} IP changed {expected_ip} -> {actual_ip} (peering may be degraded)");
         }
@@ -679,7 +907,16 @@ fn fix_peer_ips(
 /// Get a container ID from the kind node using crictl.
 fn get_container_id(node: &str, pod_name: &str, container_name: &str) -> Result<String> {
     let output = Command::new("docker")
-        .args(["exec", node, "crictl", "ps", "--name", container_name, "-o", "json"])
+        .args([
+            "exec",
+            node,
+            "crictl",
+            "ps",
+            "--name",
+            container_name,
+            "-o",
+            "json",
+        ])
         .output()?;
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -735,13 +972,23 @@ fn start_log_streaming(
 
         let log_file = fs::File::create(&log_path)?;
 
-        Command::new("kubectl")
-            .args([
-                "--context", context,
-                "logs", "-f", pod_name,
-                "-n", namespace,
-                "-c", &k8s_name,
-            ])
+        // Wrap `kubectl logs -f` in a retry loop so the stream reconnects when
+        // a container restarts (e.g. crash-loops, manual restarts). Stream is
+        // appended to the same file across restarts. The shell process becomes
+        // an orphan when leanstart exits — that's intentional.
+        let cmd = format!(
+            "while true; do \
+               kubectl --context {ctx} logs -f {pod} -n {ns} -c {k8s} 2>/dev/null; \
+               sleep 1; \
+             done",
+            ctx = context,
+            pod = pod_name,
+            ns = namespace,
+            k8s = k8s_name,
+        );
+
+        Command::new("sh")
+            .args(["-c", &cmd])
             .stdout(log_file)
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -751,4 +998,41 @@ fn start_log_streaming(
     }
 
     Ok(())
+}
+
+/// Append `kubectl logs --previous` for each pod to its log file. Called when
+/// `wait_for_pods` fails so the user has crash output even if the streaming
+/// `kubectl logs -f` only captured the most recent (post-crash) restart.
+fn snapshot_previous_logs(
+    context: &str,
+    namespace: &str,
+    pods: &[(String, String)],
+    output_dir: &PathBuf,
+) {
+    let logs_dir = output_dir.join("logs");
+    let _ = fs::create_dir_all(&logs_dir);
+
+    for (pod_name, entry_name) in pods {
+        let k8s_name = entry_name.replace('_', "-");
+        let log_path = logs_dir.join(format!("{entry_name}.previous.log"));
+        let Ok(file) = fs::File::create(&log_path) else {
+            continue;
+        };
+        let _ = Command::new("kubectl")
+            .args([
+                "--context",
+                context,
+                "logs",
+                pod_name,
+                "-n",
+                namespace,
+                "-c",
+                &k8s_name,
+                "--previous",
+                "--tail=500",
+            ])
+            .stdout(file)
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }

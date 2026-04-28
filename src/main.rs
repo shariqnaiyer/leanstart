@@ -3,6 +3,7 @@ mod config;
 mod genesis;
 mod k8s;
 mod keys;
+mod logging;
 
 use std::env;
 

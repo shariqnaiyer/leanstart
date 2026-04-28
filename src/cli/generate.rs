@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 
 use crate::config::generator::{generate_validator_config, write_validator_config};
-use crate::config::spec::{DevnetSpec, parse_client_spec};
+use crate::config::spec::{DevnetSpec, MAX_SUBNETS, parse_client_spec};
 use crate::genesis::runner::{append_genesis_validators, run_genesis_tool, write_config_yaml};
 use crate::k8s::values::{generate_helm_values, generate_pod_secrets, write_helm_values};
 use crate::keys::keygen::{generate_hash_sig_keys, write_node_keys};
@@ -54,6 +54,15 @@ pub struct GenerateArgs {
     /// Skip Docker-based genesis generation (config-only mode).
     #[arg(long)]
     pub config_only: bool,
+
+    /// Number of attestation subnets (1..=5). Each client allocation is
+    /// replicated once per subnet and one aggregator per subnet is selected.
+    #[arg(long, default_value = "1")]
+    pub subnets: u32,
+
+    /// Override config.attestation_committee_count. Defaults to --subnets.
+    #[arg(long)]
+    pub attestation_committee_count: Option<u32>,
 }
 
 impl GenerateArgs {
@@ -67,11 +76,28 @@ impl GenerateArgs {
 }
 
 pub fn run(args: GenerateArgs) -> Result<()> {
+    let log_path = crate::logging::init(&args.output_dir)?;
+    println!("Logging this run to {}", log_path.display());
+
+    let result = run_inner(args);
+    crate::logging::shutdown();
+    result
+}
+
+fn run_inner(args: GenerateArgs) -> Result<()> {
     let clients: Vec<_> = args
         .clients
         .split(',')
         .map(|s| parse_client_spec(s.trim()))
         .collect::<Result<_>>()?;
+
+    if args.subnets == 0 || args.subnets > MAX_SUBNETS {
+        anyhow::bail!(
+            "--subnets must be between 1 and {} (got {})",
+            MAX_SUBNETS,
+            args.subnets
+        );
+    }
 
     let spec = DevnetSpec {
         clients,
@@ -84,6 +110,8 @@ pub fn run(args: GenerateArgs) -> Result<()> {
         genesis_offset: args.genesis_offset,
         storage_class: args.storage_class.clone(),
         bootnode_count: args.bootnode_count,
+        subnets: args.subnets,
+        attestation_committee_count: args.attestation_committee_count,
     };
 
     let genesis_dir = args.output_dir.join("genesis");

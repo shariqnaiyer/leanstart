@@ -25,7 +25,16 @@ pub struct DevnetSpec {
     pub storage_class: Option<String>,
     /// Number of bootnode pods per client type.
     pub bootnode_count: u32,
+    /// Number of attestation subnets (1..=5). Each client allocation is replicated
+    /// once per subnet, and `attestation_committee_count` is set to this value.
+    pub subnets: u32,
+    /// Explicit override for `config.attestation_committee_count`. Defaults to
+    /// `subnets` when None.
+    pub attestation_committee_count: Option<u32>,
 }
+
+/// Maximum number of subnets supported (matches lean-quickstart MAX_SUBNETS).
+pub const MAX_SUBNETS: u32 = 5;
 
 /// A client type and how many instances (pods) to run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,8 +44,9 @@ pub struct ClientAllocation {
 }
 
 impl DevnetSpec {
-    /// Return (client_name, validator_count) for each client.
-    /// Each instance gets `validators_per_pod` validators.
+    /// Return (client_name, validator_count_per_subnet) for each client.
+    /// Each instance gets `validators_per_pod` validators. Multiplied by `subnets`
+    /// when expanded into actual nodes.
     pub fn validator_counts(&self) -> Vec<(String, u32)> {
         self.clients
             .iter()
@@ -44,9 +54,17 @@ impl DevnetSpec {
             .collect()
     }
 
-    /// Total number of validators across all clients.
+    /// Total number of validators across all clients (counts every subnet).
     pub fn total_validators(&self) -> u32 {
-        self.clients.iter().map(|c| c.instances).sum::<u32>() * self.validators_per_pod
+        self.clients.iter().map(|c| c.instances).sum::<u32>()
+            * self.validators_per_pod
+            * self.subnets
+    }
+
+    /// Effective attestation_committee_count emitted in config: explicit override
+    /// when set, otherwise the number of subnets.
+    pub fn effective_committee_count(&self) -> u32 {
+        self.attestation_committee_count.unwrap_or(self.subnets)
     }
 }
 

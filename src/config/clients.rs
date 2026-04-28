@@ -29,7 +29,7 @@ pub struct ClientDef {
 pub static CLIENTS: &[ClientDef] = &[
     ClientDef {
         name: "ethlambda",
-        image: "ghcr.io/lambdaclass/ethlambda:devnet3",
+        image: "ghcr.io/lambdaclass/ethlambda:devnet4",
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::None,
@@ -45,7 +45,7 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "ream",
-        image: "ghcr.io/reamlabs/ream:latest-devnet4",
+        image: "snaiyer1/ream:latest",
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::None,
@@ -97,12 +97,15 @@ pub fn get_client(name: &str) -> Option<&'static ClientDef> {
 /// - `hash_sig_key_index`: position in validator-config.yaml (for per-validator hash-sig)
 /// - `is_aggregator`: whether this pod is the aggregator
 /// - `attestation_committee_count`: optional override
+/// - `aggregate_subnet_ids`: CSV of subnet ids (e.g. "0,1,2") an aggregator must
+///   subscribe to. Currently honoured only by zeam.
 pub fn build_args(
     client: &ClientDef,
     node_id: &str,
     hash_sig_key_index: usize,
     is_aggregator: bool,
     attestation_committee_count: Option<u32>,
+    aggregate_subnet_ids: Option<&str>,
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -279,9 +282,19 @@ pub fn build_args(
     if is_aggregator {
         args.push("--is-aggregator".into());
     }
-    if let Some(count) = attestation_committee_count {
-        args.push("--attestation-committee-count".into());
-        args.push(count.to_string());
+    if matches!(client.name, "zeam" | "ethlambda" | "ream") {
+        if let Some(count) = attestation_committee_count {
+            args.push("--attestation-committee-count".into());
+            args.push(count.to_string());
+        }
+    }
+    if is_aggregator && matches!(client.name, "zeam" | "ethlambda" | "ream") {
+        if let Some(ids) = aggregate_subnet_ids {
+            if ids.contains(',') {
+                args.push("--aggregate-subnet-ids".into());
+                args.push(ids.into());
+            }
+        }
     }
 
     args
