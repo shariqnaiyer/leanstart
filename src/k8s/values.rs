@@ -86,21 +86,20 @@ pub fn generate_helm_values(
         None
     };
 
-    for (vc_idx, entry) in vc.validators.iter().enumerate() {
+    for entry in vc.validators.iter() {
         let client_def = get_client(&entry.client)
             .ok_or_else(|| anyhow::anyhow!("Unknown client: {}", entry.client))?;
 
         let args = build_args(
             client_def,
             &entry.name,
-            vc_idx,
             entry.is_aggregator,
             committee_count,
             aggregate_subnet_ids.as_deref(),
         );
 
         let image = if client_def.arch_aware {
-            format!("{}-amd64", client_def.image)
+            format!("{}-{}", client_def.image, image_arch_suffix())
         } else {
             client_def.image.to_string()
         };
@@ -134,6 +133,16 @@ pub fn generate_helm_values(
         bootnode_count: spec.bootnode_count,
         prometheus: PrometheusValues { enabled: true },
     })
+}
+
+/// Image-tag arch suffix for clients that publish per-arch tags (e.g. qlean,
+/// lantern). Kind on Apple Silicon runs arm64 nodes, so requesting an amd64
+/// image leaves the pod in ImagePullBackOff.
+fn image_arch_suffix() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" | "arm64" => "arm64",
+        _ => "amd64",
+    }
 }
 
 /// Write Helm values to a YAML file.

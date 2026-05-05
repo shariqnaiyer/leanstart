@@ -37,11 +37,11 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "qlean",
-        image: "qdrvm/qlean-mini:devnet-3",
-        arch_aware: false,
+        image: "qdrvm/qlean-mini:devnet-4",
+        arch_aware: true,
         seccomp_unconfined: false,
-        hash_sig_mode: HashSigMode::PerValidator,
-        has_http_port: false,
+        hash_sig_mode: HashSigMode::Directory,
+        has_http_port: true,
     },
     ClientDef {
         name: "ream",
@@ -61,7 +61,7 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "grandine",
-        image: "bomanaps/lean-client:devnet4",
+        image: "sifrai/lean:devnet-4",
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::Directory,
@@ -69,8 +69,8 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "lantern",
-        image: "piertwo/lantern:v0.0.4-test",
-        arch_aware: true,
+        image: "piertwo/lantern:v0.0.4",
+        arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::Directory,
         has_http_port: true,
@@ -94,7 +94,6 @@ pub fn get_client(name: &str) -> Option<&'static ClientDef> {
 ///
 /// Placeholders are resolved at generation time:
 /// - `node_id`: e.g. "ethlambda_0"
-/// - `hash_sig_key_index`: position in validator-config.yaml (for per-validator hash-sig)
 /// - `is_aggregator`: whether this pod is the aggregator
 /// - `attestation_committee_count`: optional override
 /// - `aggregate_subnet_ids`: CSV of subnet ids (e.g. "0,1,2") an aggregator must
@@ -102,7 +101,6 @@ pub fn get_client(name: &str) -> Option<&'static ClientDef> {
 pub fn build_args(
     client: &ClientDef,
     node_id: &str,
-    hash_sig_key_index: usize,
     is_aggregator: bool,
     attestation_committee_count: Option<u32>,
     aggregate_subnet_ids: Option<&str>,
@@ -126,18 +124,8 @@ pub fn build_args(
         }
         "qlean" => {
             args.extend_from_slice(&[
-                "--genesis".into(),
-                "/config/config.yaml".into(),
-                "--validator-registry-path".into(),
-                "/config/annotated_validators.yaml".into(),
-                "--validator-keys-manifest".into(),
-                "/config/hash-sig-keys/validator-keys-manifest.yaml".into(),
-                "--xmss-pk".into(),
-                format!("/config/hash-sig-keys/validator_{hash_sig_key_index}_pk.json"),
-                "--xmss-sk".into(),
-                format!("/config/hash-sig-keys/validator_{hash_sig_key_index}_sk.json"),
-                "--bootnodes".into(),
-                "/config/nodes.yaml".into(),
+                "--genesis-dir".into(),
+                "/config".into(),
                 "--data-dir".into(),
                 "/data".into(),
                 "--node-id".into(),
@@ -146,6 +134,14 @@ pub fn build_args(
                 format!("/config/{node_id}.key"),
                 "--listen-addr".into(),
                 "/ip4/0.0.0.0/udp/9000/quic-v1".into(),
+                "--metrics-host".into(),
+                "0.0.0.0".into(),
+                "--metrics-port".into(),
+                "8080".into(),
+                "--api-host".into(),
+                "0.0.0.0".into(),
+                "--api-port".into(),
+                "5055".into(),
             ]);
         }
         "ream" => {
