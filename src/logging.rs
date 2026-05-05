@@ -14,13 +14,13 @@ use std::thread;
 use anyhow::{Context, Result, bail};
 
 /// Initialise the tee. Subsequent stdout/stderr writes go to both the terminal
-/// and `<output_dir>/leanstart-run.log`. Returns the log file path so callers
-/// can mention it to the user.
-pub fn init(output_dir: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(output_dir)
-        .with_context(|| format!("Failed to create {}", output_dir.display()))?;
+/// and `<run_dir>/run.log`. Returns the log file path so callers can mention
+/// it to the user.
+pub fn init(run_dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(run_dir)
+        .with_context(|| format!("Failed to create {}", run_dir.display()))?;
 
-    let log_path = output_dir.join("leanstart-run.log");
+    let log_path = run_dir.join("run.log");
     let log_file = File::create(&log_path)
         .with_context(|| format!("Failed to create {}", log_path.display()))?;
 

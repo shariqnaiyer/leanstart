@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{fs, thread, time};
 
@@ -83,17 +83,23 @@ pub struct RunArgs {
 }
 
 pub fn run(args: RunArgs) -> Result<()> {
+    // Each invocation writes to its own timestamped subdir under
+    // <output_dir>/runs/, with a `latest` symlink pointing at the newest one.
+    fs::create_dir_all(&args.output_dir)
+        .with_context(|| format!("Failed to create {}", args.output_dir.display()))?;
+    let run_dir = create_run_dir(&args.output_dir)?;
+
     // Tee all stdout/stderr (including subprocess output) to a log file so the
     // user has a complete record of the run.
-    let log_path = crate::logging::init(&args.output_dir)?;
+    let log_path = crate::logging::init(&run_dir)?;
     println!("Logging this run to {}", log_path.display());
 
-    let result = run_inner(args);
+    let result = run_inner(args, &run_dir);
     crate::logging::shutdown();
     result
 }
 
-fn run_inner(args: RunArgs) -> Result<()> {
+fn run_inner(args: RunArgs, run_dir: &Path) -> Result<()> {
     let clients: Vec<ClientAllocation> = args
         .clients
         .iter()
@@ -232,10 +238,10 @@ fn run_inner(args: RunArgs) -> Result<()> {
     if let Err(e) = wait_for_pods(&context, &args.namespace, &vc) {
         // Snapshot --previous logs for any pod that crashed so the user has a
         // record on disk before we bail (streaming hasn't started yet).
-        snapshot_previous_logs(&context, &args.namespace, &pod_names, &args.output_dir);
+        snapshot_previous_logs(&context, &args.namespace, &pod_names, run_dir);
         eprintln!(
-            "\nSome pods failed to become ready. Check {}/logs/ for details.",
-            args.output_dir.display()
+            "\nSome pods failed to become ready. Check {} for details.",
+            run_dir.display()
         );
         return Err(e);
     }
@@ -254,19 +260,54 @@ fn run_inner(args: RunArgs) -> Result<()> {
     // Stream logs AFTER fix_peer_ips: that step kills and restarts containers
     // to apply the corrected peer IPs, and we want to follow the post-restart
     // containers (the long-running ones), not the short-lived initial ones.
-    println!(
-        "==> Streaming logs to {}/logs/...",
-        args.output_dir.display()
-    );
-    start_log_streaming(&context, &args.namespace, &pod_names, &args.output_dir)?;
+    println!("==> Streaming logs to {}/...", run_dir.display());
+    start_log_streaming(&context, &args.namespace, &pod_names, run_dir)?;
 
     // Done
     println!("\nDevnet is running!");
-    println!("  Logs:    {}/logs/", args.output_dir.display());
+    println!("  Logs:    {}/", run_dir.display());
     println!("  Status:  leanstart status");
     println!("  Stop:    leanstart destroy");
 
     Ok(())
+}
+
+/// Create `<output_dir>/runs/<timestamp>/` and refresh the `latest` symlink
+/// to point at it.
+fn create_run_dir(output_dir: &Path) -> Result<PathBuf> {
+    let runs_root = output_dir.join("runs");
+    fs::create_dir_all(&runs_root)?;
+
+    let ts = run_timestamp();
+    let run_dir = runs_root.join(&ts);
+    fs::create_dir_all(&run_dir)?;
+
+    let latest = runs_root.join("latest");
+    let _ = fs::remove_file(&latest);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&ts, &latest)?;
+
+    Ok(run_dir)
+}
+
+/// Local-time `YYYY-MM-DD_HH-MM-SS` for run-dir names. Uses libc rather than
+/// pulling in chrono.
+fn run_timestamp() -> String {
+    let now = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::localtime_r(&now, &mut tm) };
+    format!(
+        "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
 }
 
 /// Find generate-genesis.sh in common locations.
@@ -956,15 +997,14 @@ fn get_config_mount(node: &str, container_id: &str) -> Result<String> {
     bail!("No /config mount found in container {container_id}")
 }
 
-/// Start background log streaming for all pods to output/logs/.
+/// Start background log streaming for all pods into the run directory.
 fn start_log_streaming(
     context: &str,
     namespace: &str,
     pods: &[(String, String)],
-    output_dir: &PathBuf,
+    logs_dir: &Path,
 ) -> Result<()> {
-    let logs_dir = output_dir.join("logs");
-    fs::create_dir_all(&logs_dir)?;
+    fs::create_dir_all(logs_dir)?;
 
     for (pod_name, entry_name) in pods {
         let k8s_name = entry_name.replace('_', "-");
@@ -1007,10 +1047,9 @@ fn snapshot_previous_logs(
     context: &str,
     namespace: &str,
     pods: &[(String, String)],
-    output_dir: &PathBuf,
+    logs_dir: &Path,
 ) {
-    let logs_dir = output_dir.join("logs");
-    let _ = fs::create_dir_all(&logs_dir);
+    let _ = fs::create_dir_all(logs_dir);
 
     for (pod_name, entry_name) in pods {
         let k8s_name = entry_name.replace('_', "-");
