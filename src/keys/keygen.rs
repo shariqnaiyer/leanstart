@@ -32,7 +32,7 @@ pub fn write_node_keys(
 
 /// Generate hash-sig validator keys using the hash-sig-cli Docker image.
 ///
-/// Runs: `docker run blockblaz/hash-sig-cli:devnet2 generate --num-validators N
+/// Runs: `docker run blockblaz/hash-sig-cli:latest generate --num-validators N
 ///        --log-num-active-epochs E --output-dir /genesis/hash-sig-keys --export-format both`
 pub fn generate_hash_sig_keys(
     num_validators: u32,
@@ -53,7 +53,7 @@ pub fn generate_hash_sig_keys(
             &format!("{uid}:{gid}"),
             "-v",
             &format!("{}:/genesis", output_dir.display()),
-            "blockblaz/hash-sig-cli:devnet2",
+            "blockblaz/hash-sig-cli:latest",
             "generate",
             "--num-validators",
             &num_validators.to_string(),

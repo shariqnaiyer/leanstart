@@ -22,6 +22,8 @@ fn test_spec(clients: Vec<(&str, u32)>) -> DevnetSpec {
         genesis_offset: 120,
         storage_class: None,
         bootnode_count: 5,
+        subnets: 1,
+        attestation_committee_count: None,
     }
 }
 
