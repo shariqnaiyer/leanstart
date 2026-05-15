@@ -79,6 +79,20 @@ pub struct RunArgs {
     /// Override config.attestation_committee_count. Defaults to --subnets.
     #[arg(long)]
     pub attestation_committee_count: Option<u32>,
+
+    /// Skip Kind cluster creation and image loading. Use when targeting an
+    /// existing multi-node K8s cluster instead of a local Kind cluster.
+    #[arg(long)]
+    pub skip_kind: bool,
+
+    /// Override the kubectl/helm context. Defaults to `kind-{cluster}`.
+    /// Required when using --skip-kind.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Skip installing kube-prometheus-stack (e.g. if it is already installed).
+    #[arg(long)]
+    pub skip_metrics: bool,
 }
 
 pub fn run(args: RunArgs) -> Result<()> {
@@ -208,13 +222,24 @@ fn run_inner(args: RunArgs, run_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    // Step 3: Create kind cluster
-    println!("==> Creating kind cluster '{}'...", args.cluster);
-    create_kind_cluster(&args.cluster)?;
+    let context = args
+        .context
+        .clone()
+        .unwrap_or_else(|| format!("kind-{}", args.cluster));
 
-    // Step 4: Load Docker images into kind
-    println!("==> Loading Docker images into kind...");
-    load_images_into_kind(&spec, &args.cluster)?;
+    // Step 3: Create kind cluster (skipped for existing clusters)
+    if !args.skip_kind {
+        println!("==> Creating kind cluster '{}'...", args.cluster);
+        create_kind_cluster(&args.cluster)?;
+
+        println!("==> Loading Docker images into kind...");
+        load_images_into_kind(&spec, &args.cluster)?;
+    }
+
+    // Step 4: Install metrics stack
+    if !args.skip_metrics {
+        install_metrics_stack(&context)?;
+    }
 
     // Step 5: Generate Helm values
     println!("==> Generating Helm values...");
@@ -224,7 +249,6 @@ fn run_inner(args: RunArgs, run_dir: &Path) -> Result<()> {
 
     // Step 6: Create K8s resources and deploy
     println!("==> Deploying to Kubernetes...");
-    let context = format!("kind-{}", args.cluster);
     setup_k8s_resources(
         &context,
         &args.namespace,
@@ -274,11 +298,22 @@ fn run_inner(args: RunArgs, run_dir: &Path) -> Result<()> {
     println!("==> Streaming logs to {}/...", run_dir.display());
     start_log_streaming(&context, &args.namespace, &pod_names, run_dir)?;
 
+    if !args.skip_metrics {
+        provision_grafana_dashboard(&context)?;
+        start_metrics_port_forwards(&context)?;
+    }
+
     // Done
     println!("\nDevnet is running!");
     println!("  Logs:    {}/", run_dir.display());
     println!("  Status:  leanstart status");
     println!("  Stop:    leanstart destroy");
+    if !args.skip_metrics {
+        println!();
+        println!("Metrics:");
+        println!("  Grafana:    http://localhost:3000  (admin / admin)");
+        println!("  Prometheus: http://localhost:9090");
+    }
 
     Ok(())
 }
@@ -594,6 +629,120 @@ fn setup_k8s_resources(
     Ok(())
 }
 
+/// Inject the lean-devnet Grafana dashboard as a ConfigMap. kube-prometheus-stack's
+/// Grafana sidecar watches for ConfigMaps labelled `grafana_dashboard=1` across all
+/// namespaces and auto-loads them — no manual import needed.
+fn provision_grafana_dashboard(context: &str) -> Result<()> {
+    const DASHBOARD_JSON: &str =
+        include_str!("../../metrics/dashboards/client-dashboard.json");
+
+    // Build a YAML literal-block ConfigMap so the JSON doesn't need escaping.
+    let indented = DASHBOARD_JSON
+        .lines()
+        .map(|l| format!("    {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let cm_yaml = format!(
+        "apiVersion: v1\n\
+         kind: ConfigMap\n\
+         metadata:\n\
+         \x20 name: lean-devnet-dashboard\n\
+         \x20 namespace: monitoring\n\
+         \x20 labels:\n\
+         \x20   grafana_dashboard: \"1\"\n\
+         data:\n\
+         \x20 lean-devnet.json: |\n\
+         {indented}\n"
+    );
+
+    let mut child = Command::new("kubectl")
+        .args(["--context", context, "apply", "-f", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    use std::io::Write as _;
+    child.stdin.take().unwrap().write_all(cm_yaml.as_bytes())?;
+    child.wait()?;
+
+    Ok(())
+}
+
+/// Spawn background port-forwards so Grafana (3000) and Prometheus (9090)
+/// are reachable on localhost immediately after `leanstart run` returns.
+/// These are orphan processes — they die when the terminal closes.
+fn start_metrics_port_forwards(context: &str) -> Result<()> {
+    for (svc, local_port, remote_port) in [
+        ("svc/lean-prometheus-stack-prometheus", "9090", "9090"),
+        ("svc/lean-prometheus-stack-grafana",    "3000", "80"),
+    ] {
+        Command::new("kubectl")
+            .args([
+                "--context", context,
+                "port-forward", svc,
+                "-n", "monitoring",
+                &format!("{local_port}:{remote_port}"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .with_context(|| format!("Failed to port-forward {svc}"))?;
+    }
+    Ok(())
+}
+
+/// Install kube-prometheus-stack with Grafana. Uses `upgrade --install` so it
+/// is safe to re-run on an existing cluster.
+fn install_metrics_stack(context: &str) -> Result<()> {
+    println!("==> Installing metrics stack (kube-prometheus-stack)...");
+
+    // Add helm repos (failures are OK — already added)
+    let _ = Command::new("helm")
+        .args(["repo", "add", "prometheus-community",
+               "https://prometheus-community.github.io/helm-charts"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let _ = Command::new("helm")
+        .args(["repo", "update"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    // Minimal install: Prometheus Operator + Prometheus + Grafana only.
+    // alertmanager, kube-state-metrics, and node-exporter are disabled to
+    // keep resource usage low on devnet clusters.
+    //
+    // serviceMonitorSelectorNilUsesHelmValues=false makes Prometheus pick up
+    // ServiceMonitor objects from all namespaces regardless of release labels.
+    let status = Command::new("helm")
+        .args([
+            "upgrade", "--install",
+            "lean-prometheus-stack",
+            "prometheus-community/kube-prometheus-stack",
+            "--namespace", "monitoring",
+            "--create-namespace",
+            "--kube-context", context,
+            "--set", "alertmanager.enabled=false",
+            "--set", "kubeStateMetrics.enabled=false",
+            "--set", "nodeExporter.enabled=false",
+            "--set", "grafana.adminPassword=admin",
+            "--set", "prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false",
+            "--set", "prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false",
+            "--wait", "--timeout", "10m",
+        ])
+        .status()
+        .context("helm not found. Install with: brew install helm")?;
+
+    if !status.success() {
+        eprintln!("Warning: kube-prometheus-stack install failed (may need manual intervention)");
+    } else {
+        println!("  Metrics stack ready.");
+    }
+
+    Ok(())
+}
+
 /// Install the Helm chart.
 fn helm_install(
     context: &str,
@@ -602,11 +751,6 @@ fn helm_install(
     output_dir: &PathBuf,
 ) -> Result<()> {
     let values_path = output_dir.join("helm-values.yaml");
-
-    // Disable prometheus (no CRDs on kind)
-    let values_content = fs::read_to_string(&values_path)?;
-    let patched = values_content.replace("enabled: true", "enabled: false");
-    fs::write(&values_path, patched)?;
 
     let status = Command::new("helm")
         .args([

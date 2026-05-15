@@ -21,6 +21,10 @@ spec:
       labels:
         app: {{ $client.name }}
         app.kubernetes.io/part-of: lean-devnet
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
     spec:
       initContainers:
         - name: resolve-peers

@@ -45,7 +45,7 @@ pub static CLIENTS: &[ClientDef] = &[
     },
     ClientDef {
         name: "ream",
-        image: "snaiyer1/ream:latest",
+        image: "ghcr.io/reamlabs/ream:latest-devnet4",
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::None,
@@ -57,7 +57,7 @@ pub static CLIENTS: &[ClientDef] = &[
         arch_aware: false,
         seccomp_unconfined: true,
         hash_sig_mode: HashSigMode::None,
-        has_http_port: false,
+        has_http_port: true,
     },
     ClientDef {
         name: "grandine",
@@ -65,7 +65,7 @@ pub static CLIENTS: &[ClientDef] = &[
         arch_aware: false,
         seccomp_unconfined: false,
         hash_sig_mode: HashSigMode::Directory,
-        has_http_port: false,
+        has_http_port: true,
     },
     ClientDef {
         name: "lantern",
@@ -185,9 +185,11 @@ pub fn build_args(
                 node_id.into(),
                 "--node-key".into(),
                 format!("/config/{node_id}.key"),
-                "--metrics_enable".into(),
-                "--api-port".into(),
+                "--metrics-enable".into(),
+                "--metrics-port".into(),
                 "8080".into(),
+                "--api-port".into(),
+                "5055".into(),
             ]);
         }
         "grandine" => {
@@ -207,10 +209,14 @@ pub fn build_args(
                 "--address".into(),
                 "0.0.0.0".into(),
                 "--metrics".into(),
+                "--metrics-address".into(),
+                "0.0.0.0".into(),
+                "--metrics-port".into(),
+                "8080".into(),
                 "--http-address".into(),
                 "0.0.0.0".into(),
                 "--http-port".into(),
-                "8080".into(),
+                "5055".into(),
                 "--hash-sig-key-dir".into(),
                 "/config/hash-sig-keys".into(),
             ]);
